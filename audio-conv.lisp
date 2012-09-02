@@ -48,9 +48,9 @@
 (defun raw-vector (file &key verbose)
   (multiple-value-bind (streamer cleanup-fun)
       (make-streamer file)
-    (let*((streamer-length (mixalot:streamer-length streamer nil))
-          (raw-vector (make-array streamer-length :element-type 'mixalot:stereo-sample))
-          (last-end nil))
+    (let* ((streamer-length (mixalot:streamer-length streamer nil))
+           (raw-vector (make-array streamer-length :element-type 'mixalot:stereo-sample))
+           (last-end nil))
       (when verbose
         (format *trace-output* "file ~A approx length: ~A samples~%" file streamer-length))
       (flet ((callback (buffer start end)
@@ -63,7 +63,7 @@
         (drain-streamer streamer #'callback)
         (when cleanup-fun (funcall cleanup-fun streamer))
         (subseq raw-vector 0 last-end)))))
-    
+
 
 ;; result of this can be imported to Audacity for example (File -> Import -> Raw Data)
 (defun convert-to-raw (infile outfile &key verbose)
@@ -73,4 +73,4 @@
       (let ((written (sb-vector-io:write-vector-data raw-vector out)))
         (assert (= (length raw-vector) written))
         written))))
-        
+
