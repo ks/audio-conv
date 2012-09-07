@@ -41,22 +41,28 @@
          :finally (mixalot:streamer-cleanup streamer monitor)))))
 
 
-(defun raw-vector (file &key verbose)
+(defun raw-vector (file &key (buffer-size 16384) verbose)
   (multiple-value-bind (streamer cleanup-fun)
       (make-streamer file)
     (let* ((streamer-length (mixalot:streamer-length streamer nil))
            (raw-vector (make-array streamer-length :element-type 'mixalot:stereo-sample))
+           (countdown (ceiling streamer-length buffer-size))
            (last-end nil))
       (when verbose
         (format *trace-output* "file ~A approx length: ~A samples~%" file streamer-length))
       (flet ((callback (buffer start end)
                (when verbose
-                 (format *trace-output* "copyping ~A -> ~A~%" start end))
+                 (princ countdown *trace-output*)
+                 (princ #\space *trace-output*)
+                 (decf countdown))
                (replace raw-vector buffer
                         :start1 start :end1 end
                         :start2 0 :end2 (- end start))
                (setf last-end end)))
-        (drain-streamer streamer #'callback)
+        (when verbose
+          (format *trace-output* "extracting raw vector: "))
+        (drain-streamer streamer #'callback :buffer-size buffer-size)
+        (when verbose (terpri *trace-output*))
         (when cleanup-fun (funcall cleanup-fun streamer))
         (subseq raw-vector 0 last-end)))))
 
