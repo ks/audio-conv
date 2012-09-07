@@ -76,3 +76,83 @@
         (assert (= (length raw-vector) written))
         written))))
 
+
+;;;;;;;;;;
+
+(defparameter *lame-binary* "/usr/bin/lame")
+(defparameter *mandatory-lame-options* '("--silent"))
+(defparameter *lame-options* '("--preset" "cbr" "192" "-q" "2"))
+(defparameter *temp-dir* "/tmp/")
+(defparameter *temp-infile* "tmp-audio-conv-input")
+(defparameter *temp-outfile* "tmp-audio-conv-output")
+
+(define-condition lame-error (error)
+  ((exit-code :initarg :exit-code :reader exit-code))
+  (:report (lambda (condition stream)
+             (format stream "LAME encoding failed: exit code ~A" (exit-code condition)))))
+
+(defun convert-to-mp3 (infile outfile &key (lame-options *lame-options*) (temp-dir *temp-dir*) verbose)
+  (let ((raw-filename (concatenate 'string temp-dir (pathname-name infile) ".raw")))
+    (unwind-protect
+         (progn
+           (convert-to-raw infile raw-filename :verbose verbose)
+           (let ((args (append *mandatory-lame-options* lame-options (list raw-filename outfile))))
+             (when verbose
+               (format *trace-output* "running ~A with args: ~A~%" *lame-binary* args))
+             (let* ((lame-process (sb-ext:run-program *lame-binary* args))
+                    (exit-code (sb-ext:process-exit-code lame-process)))
+               (unless (zerop exit-code)
+                 (error 'lame-error :exit-code exit-code))
+               outfile)))
+      (when (probe-file raw-filename)
+        (delete-file raw-filename)))))
+  
+
+(defun directory-convert-to-mp3 (relative-directory-mask out-absolute-directory
+                                 &key
+                                 (default-pathname-defaults *default-pathname-defaults*)
+                                 (lame-options *lame-options*)
+                                 (temp-dir *temp-dir*)
+                                 (verbose t))
+  (ensure-directories-exist temp-dir :verbose verbose)
+  (unless (eq (car (pathname-directory relative-directory-mask)) :relative)
+    (error "RELATIVE-DIRECTORY-MASK ~A must not start with '/' use DEFAULT-PATHNAME-DEFAULTS to set the root of the path"
+           relative-directory-mask))
+  (unless (eq (car (pathname-directory out-absolute-directory)) :absolute)
+    (error "OUT-ABSOLUTE-DIRECTORY ~A must start with '/'" out-absolute-directory))
+  (unless (char= (last-elt out-absolute-directory) #\/)
+    (error "OUT-ABSOLUTE-DIRECTORY ~A must end with '/'" out-absolute-directory))
+  (unless (probe-file out-absolute-directory)
+    (unless (nth-value 1 (ensure-directories-exist out-absolute-directory :verbose verbose))
+      (error "can't create OUT-ABSOLUTE-DIRECTORY ~A" out-absolute-directory)))
+  (let* ((absolute-directory-mask (merge-pathnames relative-directory-mask default-pathname-defaults))
+         (absolute-directory-prefix-length (length (namestring default-pathname-defaults)))
+         (to-wildcard (concatenate 'string out-absolute-directory "**/*.mp3"))
+         (infiles (mapcar #'namestring (directory absolute-directory-mask)))
+         (infiles-length (length infiles)))
+    (loop
+       :for infile :in infiles
+       :for idx :from 1
+       :do (with-simple-restart (skip-file "skip converting ~A" infile)
+             (let* ((relative-infile (subseq (namestring infile) absolute-directory-prefix-length))
+                    (outfile (namestring (translate-pathname relative-infile "**/*.*" to-wildcard))))
+               (when verbose
+                 (format *trace-output* "[~A/~A] infile: ~A --> outfile: ~A~%" idx infiles-length infile outfile))
+               (ensure-directories-exist outfile :verbose verbose)
+               (let ((tmp-infile (namestring
+                                  (merge-pathnames (make-pathname :name *temp-infile*
+                                                                  :type (pathname-type infile))
+                                                   temp-dir)))
+                     (tmp-outfile (namestring (merge-pathnames *temp-outfile* temp-dir))))
+                 (unwind-protect
+                      (progn
+                        (copy-file infile tmp-infile)
+                        (convert-to-mp3 tmp-infile tmp-outfile
+                                        :lame-options lame-options :temp-dir temp-dir :verbose verbose))
+                   (when (probe-file tmp-infile)
+                     (delete-file tmp-infile))
+                   (when (probe-file tmp-outfile)
+                     (copy-file tmp-outfile outfile)
+                     (delete-file tmp-outfile)
+                     (when verbose
+                       (format *trace-output* "... converted OK~%"))))))))))
