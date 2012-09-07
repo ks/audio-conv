@@ -1,9 +1,5 @@
 (in-package #:audio-conv)
 
-;; call it from main thread before anything else
-(defun init ()
-  (mixalot:main-thread-init))
-
 
 (defun make-streamer (file)
   (if-let (probe-file file)
